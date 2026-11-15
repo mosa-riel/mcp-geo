@@ -80,7 +80,8 @@ def _dayname(d: date) -> str:
 
 @mcp.tool()
 async def weer(plaats: str = "thuis", dag: str = "vandaag") -> str:
-    """Weersverwachting voor een plaats (thuis, een plaats, adres of 'lat,lon'; ook buitenland)
+    """Weersverwachting voor een plaats (leeg, 'thuis' of 'hier' = het huis; een plaats, adres
+    of 'lat,lon'; ook buitenland)
     op een dag: 'vandaag', 'morgen', 'overmorgen', een weekdag ('zaterdag'), een datum
     (2026-11-20) of 'week' (7 dagen). Geeft per dag temperatuur, neerslag, wind en het weer,
     en voor één dag ook per 3 uur."""
@@ -137,7 +138,8 @@ async def plaats_zoeken(naam: str) -> str:
 
 @mcp.tool()
 async def route(naar: str, van: str = "thuis", vervoer: str = "fiets", dag: str = "vandaag", tijd: str = "") -> str:
-    """Route van A naar B (standaard vanaf thuis) met 'fiets', 'auto' of 'lopen': afstand,
+    """Route van A naar B met 'fiets', 'auto' of 'lopen'. Zonder startpunt, of 'thuis'/'hier',
+    is het startpunt het huis (het adres van Home Assistant). Geeft afstand,
     reistijd en de algemene richting. Bij fiets en lopen ook de wind onderweg op het vertrek-
     moment (dag als bij weer, tijd 'HH:MM'; standaard nu, of 08:00 voor een andere dag): mee,
     tegen of zij. Geeft ook de richtingen in graden."""
