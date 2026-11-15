@@ -21,7 +21,11 @@ as its own container / Home Assistant add-on; the agent connects by `url`.
   points of interest worldwide, ranked by importance; usage policy: at most 1 request/s with an
   identifying User-Agent; results cached in memory). The default pick is Nominatim's first
   result; every tool names the place it used, and `plaats_zoeken` lists alternatives.
-  [Open-Meteo geocoding](https://open-meteo.com/en/docs/geocoding-api) as fallback.
+  When Nominatim finds nothing (a misheard street name), [PDOK Locatieserver](https://api.pdok.nl/bzk/locatieserver/search/v3_1/ui/)
+  is searched with fuzzy terms (up to two letters off; Dutch addresses, streets and towns),
+  results in a town named in the query first; these are marked as similar names, so the
+  answer can say the asked-for place was not found. Then
+  [Open-Meteo geocoding](https://open-meteo.com/en/docs/geocoding-api) as the last fallback.
 - Routes: [OpenStreetMap routing by FOSSGIS](https://routing.openstreetmap.de) (OSRM: car, bike,
   foot), a public service with a fair-use policy.
 - Weather: [Open-Meteo](https://open-meteo.com) forecast.

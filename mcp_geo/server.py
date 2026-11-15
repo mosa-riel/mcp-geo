@@ -121,8 +121,10 @@ async def weer(plaats: str = "thuis", dag: str = "vandaag") -> str:
 @mcp.tool()
 async def plaats_zoeken(naam: str) -> str:
     """Zoek waar een plaats, adres of straat ligt. Geeft de standaardkeuze (die weer en route ook
-    gebruiken) en de alternatieven (Nederland via PDOK, de wereld via Open-Meteo), met afstand en
-    richting vanaf thuis. Kies zelf het juiste en geef dan 'lat,lon' door aan weer of route."""
+    gebruiken) en de alternatieven, met afstand en richting vanaf thuis. Vindt het de naam niet
+    precies (verkeerd verstaan?), dan geeft het gelijkende Nederlandse namen. Kies zelf het juiste
+    en geef dan 'lat,lon' door aan weer of route. Zoek dezelfde naam niet opnieuw in andere
+    schrijfwijzen: één keer is genoeg."""
     import math
 
     async with _client() as cli:
@@ -145,7 +147,10 @@ async def plaats_zoeken(naam: str) -> str:
                 f"van thuis")
 
     others = [c for c in cands if c is not pick]
-    return "Standaard: " + line(pick) + ("\nAlternatieven:\n" + "\n".join("- " + line(c) for c in others) if others else "")
+    head = (f"'{naam}' zelf is niet gevonden; wel deze gelijkende namen. Noem dat, en vraag welke bedoeld wordt als "
+            "het niet duidelijk is.\n" if pick.get("approx") else "")
+    return head + "Standaard: " + line(pick) + ("\nAlternatieven:\n" + "\n".join("- " + line(c) for c in others)
+                                               if others else "")
 
 
 @mcp.tool()
