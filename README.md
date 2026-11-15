@@ -1,6 +1,6 @@
 # mcp-geo
 
-Weather, places and routes MCP server for the [reSpeaker agent](https://github.com/mosa-riel/respeaker-agent).
+Weather, places, routes and road works MCP server for the [reSpeaker agent](https://github.com/mosa-riel/respeaker-agent).
 Returns data only (compact Dutch text); the model decides whether to show anything on the
 e-paper screen (mcp-screen draws maps and compasses itself). Speaks **streamable-HTTP**; runs
 as its own container / Home Assistant add-on; the agent connects by `url`.
@@ -12,6 +12,7 @@ as its own container / Home Assistant add-on; the agent connects by `url`.
 | `weer(plaats="thuis", dag="vandaag")` | forecast for a place on a day (`vandaag`, `morgen`, `overmorgen`, a weekday, `YYYY-MM-DD`, or `week`): per day temperature, rain, wind, weather, sunrise/sunset; for one day also every 3 hours |
 | `plaats_zoeken(naam)` | where a place, address, street or point of interest is: the default pick plus alternatives, each with distance and direction from home, so the model can choose and pass `lat,lon` on |
 | `route(naar, van="thuis", vervoer="fiets", dag="vandaag", tijd="")` | distance, travel time and general direction by `fiets`, `auto` or `lopen`; for cycling and walking the wind (with, against, side; component along the route) and rain on the way at departure; directions in degrees for a compass |
+| `verkeer(naar="", van="thuis", weg="", plaats="", dag="vandaag", tijd="")` | road works, closures (also on- and off-ramps), accidents, broken-down vehicles and events in the Netherlands from NDW open data. With `naar`: along the car route from `van`, main roads in the driving direction, ramps next to the route in any direction (their own text says which way, e.g. "toerit Born ri. Eindhoven"), point measures only when their text names the road there. Without `naar`: around `plaats` (8 km, or 30 km on one `weg` such as `A2`). Without `tijd` the whole day (today: from now); `week` = 7 days. No traffic jams |
 
 `thuis`, `hier` or no place is Home Assistant's `zone.home` (Supervisor proxy, `homeassistant_api: true`); `lat,lon` is used as is.
 
@@ -26,6 +27,13 @@ as its own container / Home Assistant add-on; the agent connects by `url`.
   results in a town named in the query first; these are marked as similar names, so the
   answer can say the asked-for place was not found. Then
   [Open-Meteo geocoding](https://open-meteo.com/en/docs/geocoding-api) as the last fallback.
+- Road works and closures: [NDW open data](https://opendata.ndw.nu) (Nationaal Dataportaal
+  Wegverkeer; DATEX II 3; [terms](https://docs.ndw.nu/algemeen/data-gebruiksvoorwaarden)): the
+  planning feed of road works and events by all road authorities (~15 MB, fetched at most every
+  30 min and only when `verkeer` is used; parsing takes ~15-25 s, in the background after the
+  first time) and `actueel_beeld` (what is in force now, incl. accidents; at most every 3 min).
+  Measures carry WGS84 geometry but no road numbers, so they are matched to the route
+  geometry; measures without text borrow it from the matching one nearby.
 - Routes: [OpenStreetMap routing by FOSSGIS](https://routing.openstreetmap.de) (OSRM: car, bike,
   foot), a public service with a fair-use policy.
 - Weather: [Open-Meteo](https://open-meteo.com) forecast.
