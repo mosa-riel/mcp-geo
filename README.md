@@ -12,9 +12,24 @@ as its own container / Home Assistant add-on; the agent connects by `url`.
 | `weer(plaats="thuis", dag="vandaag")` | forecast for a place on a day (`vandaag`, `morgen`, `overmorgen`, a weekday, `YYYY-MM-DD`, or `week`): per day temperature, rain, wind, weather, sunrise/sunset; for one day also every 3 hours |
 | `plaats_zoeken(naam)` | where a place, address, street or point of interest is: the default pick plus alternatives, each with distance and direction from home, so the model can choose and pass `lat,lon` on |
 | `route(naar, van="thuis", vervoer="fiets", dag="vandaag", tijd="")` | distance, travel time and general direction by `fiets`, `auto` or `lopen`; for cycling and walking the wind (with, against, side; component along the route) and rain on the way at departure; directions in degrees for a compass |
-| `verkeer(naar="", van="thuis", weg="", plaats="", dag="vandaag", tijd="")` | road works, closures (also on- and off-ramps), accidents, broken-down vehicles and events in the Netherlands from NDW open data. With `naar`: along the car route from `van`; the answer starts with a conclusion (closures on the route with their end times, or none), then "Op je route" and, separately, "NIET op je route" (other direction, or a ramp you don't take). Two signals decide whether a measure applies to the trip: its geometry (main roads in the driving direction, ramps when the route drives along them) and a direction in its text ("ri. Eindhoven") checked against the way the route goes there. Either can be wrong (NDW's text for the Born on-ramp said towards Eindhoven; Rijkswaterstaat had closed the one towards Maastricht, where the geometry lay), so on a disagreement the geometry wins when another registration of the same works (nearby, same time; NDW often carries the same works twice, plus the live record) lies the same way, and otherwise the measure is listed on the route with a note that the data disagree. Point measures count only when their text names the road there. Without `naar`: around `plaats` (8 km, or 30 km on one `weg` such as `A2`). Without `tijd` the whole day (today: from now); `week` = 7 days. No traffic jams |
+| `verkeer(naar="", van="thuis", weg="", plaats="", dag="vandaag", tijd="")` | road works, closures (also on- and off-ramps), accidents, broken-down vehicles and events in the Netherlands (NDW open data). With `naar`: along the car route from `van`, starting with a conclusion, then what is on the route and, separately, what is nearby but not on it. Without `naar`: around `plaats` (8 km, or 30 km on one `weg` such as `A2`). Without `tijd` the whole day (today: from now); `week` = 7 days. No traffic jams |
 
 `thuis`, `hier` or no place is Home Assistant's `zone.home` (Supervisor proxy, `homeassistant_api: true`); `lat,lon` is used as is.
+
+### How `verkeer` matches measures to a route
+
+NDW measures carry WGS84 geometry but no road numbers, so they are matched to the route geometry:
+
+- main roads count in the driving direction (the measure's line is drawn that way);
+- an on- or off-ramp counts when the route drives along it;
+- a point measure counts only when its text names the road at that spot (side streets cross the route);
+- diversion routes are not counted as closed roads.
+
+A direction in the text ("toerit X ri. Y") is checked against the way the route goes there. Text
+and geometry usually agree. When they don't, the geometry wins if another registration of the
+same works (NDW often carries works twice, plus the record in force now) lies the same way.
+Otherwise the measure stays on the route with a note that the data disagree: better a false
+alarm than a closed ramp. Measures without text borrow it from the matching one nearby.
 
 ## Data sources (online, public, no keys or accounts)
 
