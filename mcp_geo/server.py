@@ -244,6 +244,35 @@ def _window(dag: str, tijd: str, duration_s: float = 0) -> tuple[datetime, datet
     return start, start + timedelta(days=1), _dayname(day)
 
 
+_TOWARDS = re.compile(r"\b(?:ri\.|richting)\s+([A-Z][\w'-]+(?:[ -][A-Z][\w'-]+)?)")
+
+
+async def _side(cli: httpx.AsyncClient, route: ndw.Route, m: dict, along: float, places: dict) -> str:
+    """Does a measure found along the route apply to this trip? A direction in its text ("De toerit
+    Born ri. Eindhoven is dicht") decides first: the geometry of some ramps is placed on the wrong
+    side of the junction, the text is written by the road authority. 'andere richting' when that
+    place lies against the way the route goes from there. Without one, a ramp counts when the
+    route drives along it ('op'), else 'naast'; main roads were already matched by direction."""
+    d = _TOWARDS.search(m["text"])
+    if d:
+        name = d.group(1)
+        if name not in places:
+            try:
+                places[name] = (await geo.geocode(cli, name))[1:]
+            except (geo.GeoError, httpx.HTTPError, ValueError):
+                places[name] = None
+        here, ahead = route.at(along), route.at(along + 3000)
+        if places[name] and here != ahead:
+            diff = abs((geo.bearing(*here, *places[name]) - geo.bearing(*here, *ahead) + 180) % 360 - 180)
+            if diff > 120:
+                return "andere richting"
+            if diff < 60:
+                return "op"
+    if m.get("at") != "bij":
+        return "op"
+    return "op" if route.follows(m) >= 0.5 else "naast"
+
+
 def _summarize(found: list[tuple[float, dict, list]], where: str, limit: int = 8) -> list[str]:
     """(sort key, measure, active periods) → lines, the same text and kind merged."""
     groups: dict[tuple[str, str], dict] = {}
@@ -261,8 +290,7 @@ def _summarize(found: list[tuple[float, dict, list]], where: str, limit: int = 8
         ps = sorted(g["periods"], key=lambda p: p[0].timestamp() if p[0] else 0)
         when = "; ".join(f"{_when(a)} tot {_when(b)}" for a, b in ps[:3]) + (f" (en nog {len(ps) - 3} keer)" if len(ps) > 3 else "")
         extra = sorted(m["kinds"] - {g["head"]}, key=ndw.SEVERITY.index)
-        place = (where.format(km=g["key"] / 1000) + (f" ({m['on']})" if m.get("on") else "")
-                 + (", op- of afrit naast de route" if m.get("at") == "bij" else ""))
+        place = where.format(km=g["key"] / 1000) + (f" ({m['on']})" if m.get("on") else "")
         lines.append(f"- {g['head']}{' (nu)' if g['live'] else ''}{', ' + ', '.join(extra) if extra else ''}"
                      f" [{place}{', ' + m['road'] if m['road'] else ''}; {m['source'] or 'NDW'}]: "
                      f"{m['text'] or 'geen omschrijving'}. Wanneer: {when}.")
@@ -340,7 +368,9 @@ async def verkeer(naar: str = "", van: str = "thuis", weg: str = "", plaats: str
         lats, lons = zip(*rt["coords"])
         box = (min(lats) - 0.005, max(lats) + 0.005, min(lons) - 0.008, max(lons) + 0.008)
         for m in measures.values():
-            if m["kinds"] <= _MINOR | {"fiets- of voetpad dicht"}:  # a car route
+            if m["kinds"] <= _MINOR | {"fiets- of voetpad dicht", "werkzaamheden"} and "fiets- of voetpad dicht" in m["kinds"]:
+                continue  # a car route
+            if m["kinds"] <= _MINOR:
                 continue
             pts = [p for _, line in m["lines"] for p in line[:: max(1, len(line) // 4)]] + [p for _, p in m["points"]]
             if not any(box[0] <= p[0] <= box[1] and box[2] <= p[1] <= box[3] for p in pts):
@@ -366,9 +396,37 @@ async def verkeer(naar: str = "", van: str = "thuis", weg: str = "", plaats: str
         where = "{km:.0f} km van " + c_label
     age = ndw.feeds.age_min(ndw.PLANNING)
     head += f" (NDW{f', {age} min oud' if age else ''}):"
-    if not found:
-        return head + "\nGeen afsluitingen, werkzaamheden of ongevallen gevonden. Files staan niet in deze bron."
-    return "\n".join([head] + _summarize(_merge_textless(found), where))
+    found = _merge_textless(found)
+    if not naar:
+        if not found:
+            return head + "\nGeen afsluitingen, werkzaamheden of ongevallen gevonden. Files staan niet in deze bron."
+        return "\n".join([head] + _summarize(found, where))
+    # On this trip, or the other direction ("ri. Eindhoven" on a trip south), or a ramp you don't take?
+    places: dict = {}
+    async with httpx.AsyncClient(timeout=20, headers=geo.UA, follow_redirects=True) as cli:
+        for i, (k, m, p) in enumerate(found):
+            found[i] = (k, dict(m, at=await _side(cli, route, m, k, places)), p)
+    on = [x for x in found if x[1].get("at") == "op"]
+    off = [x for x in found if x[1].get("at") != "op"]
+    closed = [x for x in on if any(k.endswith(" dicht") or k == "ongeval" for k in x[1]["kinds"])]
+    lines = [head]
+    if closed:
+        brief = []
+        for k, m, p in sorted(closed, key=lambda x: x[0]):
+            head = min(m["kinds"], key=ndw.SEVERITY.index)
+            ends = [b for _, b in p]
+            until = "einde onbekend" if None in ends else f"tot {_when(max(ends))}"
+            brief.append(f"{head} bij km {k / 1000:.0f}{' (' + m['on'] + ')' if m.get('on') else ''} {until}")
+        lines.append(f"Conclusie: op je route in deze periode {'; '.join(dict.fromkeys(brief))}.")
+    else:
+        lines.append("Conclusie: geen afsluitingen of ongevallen op je route in deze periode"
+                     + (" (alleen kleinere hinder)." if on else ".") + " Files staan niet in deze bron.")
+    if on:
+        lines += ["Op je route:"] + _summarize(on, where)
+    if off:
+        lines += ["Vlakbij, maar NIET op je route (andere rijrichting of een op-/afrit die je niet neemt); alleen ter info:"]
+        lines += _summarize(off, where, limit=3)
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":

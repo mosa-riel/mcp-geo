@@ -143,6 +143,11 @@ def _situation(el: ET.Element, live: bool) -> dict | None:
         closed = {k for k in kinds if k.endswith(" dicht")}
         if closed:
             kinds = (kinds - closed) | {"fiets- of voetpad dicht"}
+    # Road authorities label their measure ("Weg dicht in beide richtingen", "Verminderd aantal
+    # rijstroken beschikbaar"); a lanes-only measure is not a closed road, whatever its records say.
+    if re.search(r"verminderd aantal rijstroken", text, re.I) and not re.search(r"\bweg dicht\b", text, re.I) \
+            and "weg dicht" in kinds:
+        kinds = (kinds - {"weg dicht"}) | {"rijstrook dicht of versmald"}
     if not kinds or not (lines or points):
         return None
     road = _ROAD.search(text)
@@ -216,6 +221,7 @@ class Route:
     CELL = 250.0
 
     def __init__(self, coords: list[tuple[float, float]]) -> None:
+        self.coords = coords
         self.pts = [_xy(p) for p in coords]
         self.cum = [0.0]
         for a, b in zip(self.pts, self.pts[1:]):
@@ -243,6 +249,26 @@ class Route:
                     if best is None or d < best[0]:
                         best = (d, i, self.cum[i] + t * math.sqrt(ll))
         return best
+
+    def at(self, along: float) -> tuple[float, float]:
+        """(lat, lon) of the route point nearest to `along` metres (clamped to the route)."""
+        i = min(range(len(self.cum)), key=lambda j: abs(self.cum[j] - along))
+        return self.coords[i]
+
+    def follows(self, m: dict) -> float:
+        """Share of the points of m's ramp lines that lie on the route (within 15 m, same way)."""
+        total = on = 0
+        for cw, line in m["lines"]:
+            if cw not in ("entrySlipRoad", "exitSlipRoad") or len(line) < 2:
+                continue
+            xy = [_xy(p) for p in line]
+            for a, b in zip(xy, xy[1:]):
+                total += 1
+                n = self.nearest(((a[0] + b[0]) / 2, (a[1] + b[1]) / 2))
+                if n is not None and n[0] <= 15.0:
+                    diff = abs((math.atan2(b[0] - a[0], b[1] - a[1]) - self.heading(n[1]) + math.pi) % (2 * math.pi) - math.pi)
+                    on += diff <= math.radians(45)
+        return on / total if total else 0.0
 
     def heading(self, i: int) -> float:
         a, b = self.pts[i], self.pts[i + 1]
