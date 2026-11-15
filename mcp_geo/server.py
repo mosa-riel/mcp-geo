@@ -81,7 +81,8 @@ def _dayname(d: date) -> str:
 @mcp.tool()
 async def weer(plaats: str = "thuis", dag: str = "vandaag") -> str:
     """Weersverwachting voor een plaats (leeg, 'thuis' of 'hier' = het huis; een plaats, adres
-    of 'lat,lon'; ook buitenland)
+    of 'lat,lon'; ook buitenland; het antwoord noemt de gebruikte plaats: klopt die niet, gebruik
+    plaats_zoeken en geef 'lat,lon' mee)
     op een dag: 'vandaag', 'morgen', 'overmorgen', een weekdag ('zaterdag'), een datum
     (2026-11-20) of 'week' (7 dagen). Geeft per dag temperatuur, neerslag, wind en het weer,
     en voor één dag ook per 3 uur."""
@@ -119,30 +120,42 @@ async def weer(plaats: str = "thuis", dag: str = "vandaag") -> str:
 
 @mcp.tool()
 async def plaats_zoeken(naam: str) -> str:
-    """Zoek waar een plaats, adres of gemeente ligt (Nederland via PDOK, elders via Open-Meteo).
-    Geeft naam, coördinaten en afstand en richting vanaf thuis."""
-    async with _client() as cli:
-        try:
-            label, lat, lon = await geo.geocode(cli, naam)
-            _, hlat, hlon = await geo.home(cli)
-        except (geo.GeoError, httpx.HTTPError) as err:
-            return f"Niet gevonden: {err}"
+    """Zoek waar een plaats, adres of straat ligt. Geeft de standaardkeuze (die weer en route ook
+    gebruiken) en de alternatieven (Nederland via PDOK, de wereld via Open-Meteo), met afstand en
+    richting vanaf thuis. Kies zelf het juiste en geef dan 'lat,lon' door aan weer of route."""
     import math
 
-    dist = 6371 * 2 * math.asin(math.sqrt(math.sin(math.radians(lat - hlat) / 2) ** 2 + math.cos(math.radians(hlat))
-                                          * math.cos(math.radians(lat)) * math.sin(math.radians(lon - hlon) / 2) ** 2))
-    b = geo.bearing(hlat, hlon, lat, lon)
-    return (f"{label}: lat {lat:.5f}, lon {lon:.5f}. Hemelsbreed {_nl(dist)} km {geo.compass_long(b)} van thuis "
-            f"(richting {round(b)}°).")
+    async with _client() as cli:
+        try:
+            _, hlat, hlon = await geo.home(cli)
+            q = (naam or "").strip()
+            cands = await geo.candidates(cli, q)
+        except (geo.GeoError, httpx.HTTPError) as err:
+            return f"Niet gevonden: {err}"
+    if not cands:
+        return f"Geen plaats gevonden voor '{naam}'."
+    pick = geo.best(q, cands)
+
+    def line(c: dict) -> str:
+        d = 6371 * 2 * math.asin(math.sqrt(math.sin(math.radians(c["lat"] - hlat) / 2) ** 2 + math.cos(math.radians(hlat))
+                                           * math.cos(math.radians(c["lat"])) * math.sin(math.radians(c["lon"] - hlon) / 2) ** 2))
+        b = geo.bearing(hlat, hlon, c["lat"], c["lon"])
+        extra = f", {c['population']} inwoners" if c.get("population") else ""
+        return (f"{c['label']} ({c['kind']}{extra}): {c['lat']:.5f},{c['lon']:.5f}, {_nl(d)} km {geo.compass_long(b)} "
+                f"van thuis")
+
+    others = [c for c in cands if c is not pick]
+    return "Standaard: " + line(pick) + ("\nAlternatieven:\n" + "\n".join("- " + line(c) for c in others) if others else "")
 
 
 @mcp.tool()
 async def route(naar: str, van: str = "thuis", vervoer: str = "fiets", dag: str = "vandaag", tijd: str = "") -> str:
     """Route van A naar B met 'fiets', 'auto' of 'lopen'. Zonder startpunt, of 'thuis'/'hier',
-    is het startpunt het huis (het adres van Home Assistant). Geeft afstand,
+    is het startpunt het huis (het adres van Home Assistant); van en naar mogen ook 'lat,lon' zijn
+    (controleer de genoemde plaatsen; klopt er een niet, gebruik plaats_zoeken). Geeft afstand,
     reistijd en de algemene richting. Bij fiets en lopen ook de wind onderweg op het vertrek-
     moment (dag als bij weer, tijd 'HH:MM'; standaard nu, of 08:00 voor een andere dag): mee,
-    tegen of zij. Geeft ook de richtingen in graden."""
+    tegen of zij, en de regen onderweg (mm en kans). Geeft ook de richtingen in graden."""
     vervoer = vervoer if vervoer in geo.PROFILES else "fiets"
     async with _client() as cli:
         try:
@@ -165,6 +178,8 @@ async def route(naar: str, van: str = "thuis", vervoer: str = "fiets", dag: str 
                 h = fc["hourly"]
                 i = h["time"].index(key) if key in h["time"] else 0
                 wdir, wspd, gust = h["wind_direction_10m"][i], h["wind_speed_10m"][i], h["wind_gusts_10m"][i]
+                rain = sum(h["precipitation"][i:i + max(1, round(rt["duration_s"] / 3600 + 0.49))])
+                chance = max(h["precipitation_probability"][i:i + 2] or [0]) or 0
                 rel = (wdir - heading + 360) % 360  # 0 = wind from straight ahead
                 if rel < 30 or rel > 330:
                     kind = "tegenwind"
@@ -181,7 +196,9 @@ async def route(naar: str, van: str = "thuis", vervoer: str = "fiets", dag: str 
                 along = wspd * math.cos(math.radians(rel))
                 wind_txt = (f" Wind om {start:%H:%M} onderweg: uit het {geo.compass_long(wdir)} ({geo.compass(wdir)}), "
                             f"{_nl(wspd)} km/u, stoten {_nl(gust)}: {kind} "
-                            f"({'tegen' if along > 0 else 'mee'} ~{_nl(abs(along))} km/u in je rijrichting).")
+                            f"({'tegen' if along > 0 else 'mee'} ~{_nl(abs(along))} km/u in je rijrichting). "
+                            f"Regen onderweg: {_nl(rain, 1)} mm, kans {chance}% "
+                            f"({geo.WMO.get(h['weather_code'][i], 'onbekend')}).")
                 wind_to = round((wdir + 180) % 360)
         except (geo.GeoError, httpx.HTTPError, ValueError) as err:
             return f"Route niet gelukt: {err}"

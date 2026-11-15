@@ -2,9 +2,9 @@
 # `<repo>-mcp-geo:8790`. No `ports:` mapping — internal-only, never on the LAN.
 # homeassistant_api: reads zone.home (where "thuis" is) through the Supervisor proxy.
 name: MCP Geo (weer, plaatsen, routes)
-version: "0.1.0"
+version: "0.1.1"
 slug: mcp_geo
-description: Weather anywhere (Open-Meteo), places (PDOK Locatieserver) and routes with wind (OpenStreetMap routing) for the reSpeaker agent
+description: Weather anywhere (Open-Meteo), places (OpenStreetMap Nominatim) and routes with wind and rain (OpenStreetMap routing) for the reSpeaker agent
 url: https://github.com/mosa-riel/mcp-geo
 arch:
   - aarch64

@@ -10,16 +10,18 @@ as its own container / Home Assistant add-on; the agent connects by `url`.
 | tool | what |
 |---|---|
 | `weer(plaats="thuis", dag="vandaag")` | forecast for a place on a day (`vandaag`, `morgen`, `overmorgen`, a weekday, `YYYY-MM-DD`, or `week`): per day temperature, rain, wind, weather, sunrise/sunset; for one day also every 3 hours |
-| `plaats_zoeken(naam)` | where a place/address is, with distance and direction from home |
-| `route(naar, van="thuis", vervoer="fiets", dag="vandaag", tijd="")` | distance, travel time and general direction by `fiets`, `auto` or `lopen`; for cycling and walking the wind on the way at departure (with, against, side; component along the route); directions in degrees for a compass |
+| `plaats_zoeken(naam)` | where a place, address, street or point of interest is: the default pick plus alternatives, each with distance and direction from home, so the model can choose and pass `lat,lon` on |
+| `route(naar, van="thuis", vervoer="fiets", dag="vandaag", tijd="")` | distance, travel time and general direction by `fiets`, `auto` or `lopen`; for cycling and walking the wind (with, against, side; component along the route) and rain on the way at departure; directions in degrees for a compass |
 
-`thuis` is Home Assistant's `zone.home` (Supervisor proxy, `homeassistant_api: true`).
+`thuis`, `hier` or no place is Home Assistant's `zone.home` (Supervisor proxy, `homeassistant_api: true`); `lat,lon` is used as is.
 
 ## Data sources (online, public, no keys or accounts)
 
-- Places in the Netherlands: [PDOK Locatieserver](https://api.pdok.nl/bzk/locatieserver) (Kadaster);
-  towns first, addresses when the query has a number.
-- Places elsewhere: [Open-Meteo geocoding](https://open-meteo.com/en/docs/geocoding-api).
+- Places: [OpenStreetMap Nominatim](https://nominatim.openstreetmap.org) (addresses, towns and
+  points of interest worldwide, ranked by importance; usage policy: at most 1 request/s with an
+  identifying User-Agent; results cached in memory). The default pick is Nominatim's first
+  result; every tool names the place it used, and `plaats_zoeken` lists alternatives.
+  [Open-Meteo geocoding](https://open-meteo.com/en/docs/geocoding-api) as fallback.
 - Routes: [OpenStreetMap routing by FOSSGIS](https://routing.openstreetmap.de) (OSRM: car, bike,
   foot), a public service with a fair-use policy.
 - Weather: [Open-Meteo](https://open-meteo.com) forecast.
