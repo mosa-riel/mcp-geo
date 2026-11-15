@@ -247,13 +247,17 @@ def _window(dag: str, tijd: str, duration_s: float = 0) -> tuple[datetime, datet
 _TOWARDS = re.compile(r"\b(?:ri\.|richting)\s+([A-Z][\w'-]+(?:[ -][A-Z][\w'-]+)?)")
 
 
-async def _side(cli: httpx.AsyncClient, route: ndw.Route, m: dict, along: float, places: dict) -> str:
-    """Does a measure found along the route apply to this trip? A direction in its text ("De toerit
-    Born ri. Eindhoven is dicht") decides first: the geometry of some ramps is placed on the wrong
-    side of the junction, the text is written by the road authority. 'andere richting' when that
-    place lies against the way the route goes from there. Without one, a ramp counts when the
-    route drives along it ('op'), else 'naast'; main roads were already matched by direction."""
-    d = _TOWARDS.search(m["text"])
+async def _side(cli: httpx.AsyncClient, route: ndw.Route, m: dict, along: float, places: dict) -> tuple[str, str]:
+    """Does a measure found along the route apply to this trip? → ('op' | 'andere richting' |
+    'naast', note). Two signals: the geometry (main roads were matched in the driving direction;
+    a ramp counts when the route drives along it) and a direction in the text ("De toerit Born ri.
+    Eindhoven is dicht"), checked against the way the route goes there. Either can be wrong: on
+    2026-11-15 NDW's text said 'ri. Eindhoven' while Rijkswaterstaat closed the ramp towards
+    Maastricht, where the geometry lay. So when either signal puts it on the route, it is on the
+    route, and a disagreement is said out loud; only when both say otherwise is it left out."""
+    ramp = m.get("at") == "bij"
+    geometry = "op" if (not ramp or route.follows(m) >= 0.5) else "naast"
+    text, d = None, _TOWARDS.search(m["text"])
     if d:
         name = d.group(1)
         if name not in places:
@@ -264,13 +268,15 @@ async def _side(cli: httpx.AsyncClient, route: ndw.Route, m: dict, along: float,
         here, ahead = route.at(along), route.at(along + 3000)
         if places[name] and here != ahead:
             diff = abs((geo.bearing(*here, *places[name]) - geo.bearing(*here, *ahead) + 180) % 360 - 180)
-            if diff > 120:
-                return "andere richting"
-            if diff < 60:
-                return "op"
-    if m.get("at") != "bij":
-        return "op"
-    return "op" if route.follows(m) >= 0.5 else "naast"
+            text = "andere richting" if diff > 120 else "op" if diff < 60 else None
+    if geometry == "op" and text == "andere richting":
+        return "op", (f"LET OP: de tekst noemt 'richting {d.group(1)}', maar volgens de ligging is het jouw "
+                      "rijrichting; de gegevens spreken elkaar tegen, ga uit van dicht en controleer het")
+    if geometry == "naast" and text == "op":
+        return "op", "volgens de tekst jouw richting; volgens de ligging een andere op-/afrit, ga uit van dicht"
+    if geometry == "op":
+        return "op", ""
+    return text or "naast", ""
 
 
 def _summarize(found: list[tuple[float, dict, list]], where: str, limit: int = 8) -> list[str]:
@@ -291,6 +297,8 @@ def _summarize(found: list[tuple[float, dict, list]], where: str, limit: int = 8
         when = "; ".join(f"{_when(a)} tot {_when(b)}" for a, b in ps[:3]) + (f" (en nog {len(ps) - 3} keer)" if len(ps) > 3 else "")
         extra = sorted(m["kinds"] - {g["head"]}, key=ndw.SEVERITY.index)
         place = where.format(km=g["key"] / 1000) + (f" ({m['on']})" if m.get("on") else "")
+        if m.get("note"):
+            lines.append(f"- {m['note'].upper()[:1]}{m['note'][1:]}:")
         lines.append(f"- {g['head']}{' (nu)' if g['live'] else ''}{', ' + ', '.join(extra) if extra else ''}"
                      f" [{place}{', ' + m['road'] if m['road'] else ''}; {m['source'] or 'NDW'}]: "
                      f"{m['text'] or 'geen omschrijving'}. Wanneer: {when}.")
@@ -405,7 +413,8 @@ async def verkeer(naar: str = "", van: str = "thuis", weg: str = "", plaats: str
     places: dict = {}
     async with httpx.AsyncClient(timeout=20, headers=geo.UA, follow_redirects=True) as cli:
         for i, (k, m, p) in enumerate(found):
-            found[i] = (k, dict(m, at=await _side(cli, route, m, k, places)), p)
+            side, note = await _side(cli, route, m, k, places)
+            found[i] = (k, dict(m, at=side, note=note), p)
     on = [x for x in found if x[1].get("at") == "op"]
     off = [x for x in found if x[1].get("at") != "op"]
     closed = [x for x in on if any(k.endswith(" dicht") or k == "ongeval" for k in x[1]["kinds"])]
@@ -416,7 +425,8 @@ async def verkeer(naar: str = "", van: str = "thuis", weg: str = "", plaats: str
             head = min(m["kinds"], key=ndw.SEVERITY.index)
             ends = [b for _, b in p]
             until = "einde onbekend" if None in ends else f"tot {_when(max(ends))}"
-            brief.append(f"{head} bij km {k / 1000:.0f}{' (' + m['on'] + ')' if m.get('on') else ''} {until}")
+            brief.append(f"{head} bij km {k / 1000:.0f}{' (' + m['on'] + ')' if m.get('on') else ''} {until}"
+                         + (" (gegevens tegenstrijdig over de richting)" if m.get("note") else ""))
         lines.append(f"Conclusie: op je route in deze periode {'; '.join(dict.fromkeys(brief))}.")
     else:
         lines.append("Conclusie: geen afsluitingen of ongevallen op je route in deze periode"
