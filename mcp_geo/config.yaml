@@ -1,0 +1,19 @@
+# Bridged network (no host_network): the agent reaches this by internal DNS name
+# `<repo>-mcp-geo:8790`. No `ports:` mapping — internal-only, never on the LAN.
+# homeassistant_api: reads zone.home (where "thuis" is) through the Supervisor proxy.
+name: MCP Geo (weer, plaatsen, routes)
+version: "0.1.0"
+slug: mcp_geo
+description: Weather anywhere (Open-Meteo), places (PDOK Locatieserver) and routes with wind (OpenStreetMap routing) for the reSpeaker agent
+url: https://github.com/mosa-riel/mcp-geo
+arch:
+  - aarch64
+  - amd64
+init: true
+boot: auto
+startup: services
+homeassistant_api: true
+options:
+  mcp_port: 8790
+schema:
+  mcp_port: port
